@@ -12,7 +12,7 @@ if you would like to get started fast, have a working demo in 10 minutes and use
 
 ## How do I get started fast?
 
-* The easiest approach is to use the AWS Serverless Application Repository (SAR) to install lambda-cache from this link:
+* The easiest approach is to use the AWS Serverless Application Repository (SAR) to install lambda-cache from this link: [Quick install] (https://serverlessrepo.aws.amazon.com/applications/us-east-1/484660614037/lambda-cache)
 * It is recommended to create a new account (in AWS Organizations) to treat the lambda-cache as an independent microservice.
 * You are going to have some lambda functions demo applications that you can analize to undertand how lambda-cache works.
 * Two SDKs (python and nodejs) based on lambda layers will be created and will be ready to use by you applications quickly.
