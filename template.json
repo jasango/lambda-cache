@@ -1,0 +1,471 @@
+{
+   "AWSTemplateFormatVersion": "2010-09-09",
+   "Transform": "AWS::Serverless-2016-10-31",
+   "Description": "lambda-cache: Serverless memory microservice for the internet operating system.",
+   "Parameters": {
+      "StorageBucketName": {
+         "Type": "String",
+         "Default": "storage-bucket-123456789",
+         "Description": "Lambda-Cache storage bucket, please change it to a not common name to avoid global bucket name conflict and the roll back of your stack."
+      },
+      "KeyGroupId": {
+         "Type": "String",
+         "Description": "(Optional) Key Group ID of the key group created in cloudfront to generate signed url for cache access. If you would like authentication it is neccesary. Please follow the instructions to create it in the documentation.",
+         "Default": "None"
+      }
+   },
+   "Conditions": {
+      "UseAuthentication": {
+         "Fn::Not": [{
+            "Fn::Equals": [
+               { "Ref": "KeyGroupId" },
+               "None"
+            ]
+         }]
+      }
+   },
+   "Resources": {
+      "PublicDistOriginAccessIdentity": {
+         "Type": "AWS::CloudFront::CloudFrontOriginAccessIdentity",
+         "Properties": {
+            "CloudFrontOriginAccessIdentityConfig": {
+               "Comment": "public-dist-oai"
+            }
+         }
+      },
+      "PrivateDistOriginAccessIdentity": {
+         "Type": "AWS::CloudFront::CloudFrontOriginAccessIdentity",
+         "Condition": "UseAuthentication",
+         "Properties": {
+            "CloudFrontOriginAccessIdentityConfig": {
+               "Comment": "private-dist-oai"
+            }
+         }
+      },
+      "StorageBucket": {
+         "Type": "AWS::S3::Bucket",
+         "Properties": {
+            "BucketName": { "Ref": "StorageBucketName" },
+            "BucketEncryption": {
+               "ServerSideEncryptionConfiguration": [{
+                  "ServerSideEncryptionByDefault": {
+                     "SSEAlgorithm": "AES256"
+                  },
+                  "BucketKeyEnabled": false
+               }]
+            },
+            "CorsConfiguration": {
+               "CorsRules": [{
+                  "AllowedHeaders": [
+                     "*"
+                  ],
+                  "AllowedMethods": [
+                     "GET"
+                  ],
+                  "AllowedOrigins": [
+                     "*"
+                  ]
+               }]
+            }
+         }
+      },
+      "S3BucketPolicy": {
+         "Type": "AWS::S3::BucketPolicy",
+         "Properties": {
+            "Bucket": { "Ref": "StorageBucketName" },
+            "PolicyDocument": {
+               "Version": "2008-10-17",
+               "Id": "PolicyForCloudFrontPrivateContent",
+               "Statement": [{
+                     "Sid": "1",
+                     "Effect": "Allow",
+                     "Principal": {
+                        "AWS": {
+                           "Fn::Join": [
+                              "", [
+                                 "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ",
+                                 { "Ref": "PublicDistOriginAccessIdentity" }
+                              ]
+                           ]
+                        }
+                     },
+                     "Action": "s3:GetObject",
+                     "Resource": {
+                        "Fn::Join": [
+                           "", [
+                              "arn:aws:s3:::",
+                              { "Ref": "StorageBucketName" },
+                              "/public/*"
+                           ]
+                        ]
+                     }
+                  },
+                  "Fn::If": [
+                     "UseAuthentication",
+
+                     {
+                        "Sid": "2",
+                        "Effect": "Allow",
+                        "Principal": {
+                           "AWS": {
+                              "Fn::Join": [
+                                 "", [
+                                    "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ",
+                                    { "Ref": "PrivateDistOriginAccessIdentity" }
+                                 ]
+                              ]
+                           }
+                        },
+                        "Action": "s3:GetObject",
+                        "Resource": {
+                           "Fn::Join": [
+                              "", [
+                                 "arn:aws:s3:::",
+                                 { "Ref": "StorageBucketName" },
+                                 "/private/*"
+                              ]
+                           ]
+                        }
+                     },
+                     { "Ref": "AWS::NoValue" }
+                  ]
+
+               ]
+            }
+         }
+      },
+      "PublicDistribution": {
+         "Type": "AWS::CloudFront::Distribution",
+         "Properties": {
+            "DistributionConfig": {
+               "Origins": [{
+                  "ConnectionAttempts": 3,
+                  "ConnectionTimeout": 10,
+                  "DomainName": {
+                     "Fn::Join": [
+                        "", [
+                           { "Ref": "StorageBucketName" },
+                           ".s3.amazonaws.com"
+                        ]
+                     ]
+                  },
+                  "Id": "PublicDistOrigin",
+                  "OriginPath": "/public",
+                  "S3OriginConfig": {
+                     "OriginAccessIdentity": {
+                        "Fn::Join": [
+                           "", [
+                              "origin-access-identity/cloudfront/",
+                              { "Ref": "PublicDistOriginAccessIdentity" }
+                           ]
+                        ]
+                     }
+                  }
+               }],
+               "OriginGroups": {
+                  "Quantity": 0
+               },
+               "DefaultCacheBehavior": {
+                  "AllowedMethods": [
+                     "HEAD",
+                     "GET",
+                     "OPTIONS"
+                  ],
+                  "CachedMethods": [
+                     "HEAD",
+                     "GET"
+                  ],
+                  "Compress": false,
+                  "DefaultTTL": 1,
+                  "ForwardedValues": {
+                     "Cookies": {
+                        "Forward": "none"
+                     },
+                     "Headers": [
+                        "Origin",
+                        "Access-Control-Request-Method",
+                        "Access-Control-Request-Headers"
+                     ],
+                     "QueryString": false
+                  },
+                  "MaxTTL": 30,
+                  "MinTTL": 1,
+                  "SmoothStreaming": false,
+                  "TargetOriginId": "PublicDistOrigin",
+                  "ViewerProtocolPolicy": "https-only"
+               },
+               "Comment": { "Fn::Join": ["", [{ "Ref": "AWS::StackName" }, ": ", "Public Distribution"]] },
+               "PriceClass": "PriceClass_100",
+               "Enabled": true,
+               "ViewerCertificate": {
+                  "CloudFrontDefaultCertificate": true,
+                  "MinimumProtocolVersion": "TLSv1"
+               },
+               "Restrictions": {
+                  "GeoRestriction": {
+                     "RestrictionType": "none"
+                  }
+               },
+               "HttpVersion": "http2",
+               "DefaultRootObject": "index.html",
+               "IPV6Enabled": true
+            }
+         }
+      },
+      "PrivateDistribution": {
+         "Type": "AWS::CloudFront::Distribution",
+         "Condition": "UseAuthentication",
+         "Properties": {
+            "DistributionConfig": {
+               "Origins": [{
+                  "ConnectionAttempts": 3,
+                  "ConnectionTimeout": 10,
+                  "DomainName": {
+                     "Fn::Join": [
+                        "", [
+                           { "Ref": "StorageBucketName" },
+                           ".s3.amazonaws.com"
+                        ]
+                     ]
+                  },
+                  "Id": "PrivateDistOrigin",
+                  "OriginPath": "/private",
+                  "S3OriginConfig": {
+                     "OriginAccessIdentity": {
+                        "Fn::Join": [
+                           "", [
+                              "origin-access-identity/cloudfront/",
+                              { "Ref": "PrivateDistOriginAccessIdentity" }
+                           ]
+                        ]
+                     }
+                  }
+               }],
+               "OriginGroups": {
+                  "Quantity": 0
+               },
+               "DefaultCacheBehavior": {
+                  "AllowedMethods": [
+                     "HEAD",
+                     "GET",
+                     "OPTIONS"
+                  ],
+                  "CachedMethods": [
+                     "HEAD",
+                     "GET"
+                  ],
+                  "Compress": true,
+                  "DefaultTTL": 1,
+                  "ForwardedValues": {
+                     "Cookies": {
+                        "Forward": "none"
+                     },
+                     "Headers": [
+                        "Origin",
+                        "Access-Control-Request-Method",
+                        "Access-Control-Request-Headers"
+                     ],
+                     "QueryString": false
+                  },
+                  "MaxTTL": 30,
+                  "MinTTL": 1,
+                  "SmoothStreaming": false,
+                  "TargetOriginId": "PrivateDistOrigin",
+                  "TrustedKeyGroups": [{ "Fn::If": ["UseAuthentication", { "Ref": "KeyGroupId" }, { "Ref": "AWS::NoValue" }] }],
+                  "ViewerProtocolPolicy": "https-only"
+               },
+               "Comment": { "Fn::Join": ["", [{ "Ref": "AWS::StackName" }, ": ", "Private Distribution"]] },
+               "PriceClass": "PriceClass_100",
+               "Enabled": true,
+               "ViewerCertificate": {
+                  "CloudFrontDefaultCertificate": true,
+                  "MinimumProtocolVersion": "TLSv1"
+               },
+               "Restrictions": {
+                  "GeoRestriction": {
+                     "RestrictionType": "none"
+                  }
+               },
+               "HttpVersion": "http2",
+               "DefaultRootObject": "",
+               "IPV6Enabled": true
+            },
+            "Tags": [{
+               "Key": "Name",
+               "Value": "PrivateDistribution"
+            }]
+         }
+      },
+      "LambdaLayerPython": {
+         "Type": "AWS::Lambda::LayerVersion",
+         "Properties": {
+            "Description": "Serverless Memory Service Python SDK",
+            "CompatibleRuntimes": [
+               "python3.8"
+            ],
+            "LicenseInfo": "MIT",
+            "LayerName": "lambda-cache-python-sdk",
+            "Content": {
+               "S3Bucket": "SOURCE_BUCKET_NAME",
+               "S3Key": "sdk/lambda-cache-python-sdk-VERSION.zip"
+            }
+         }
+      },
+      "LambdaLayerNodejs": {
+         "Type": "AWS::Lambda::LayerVersion",
+         "Properties": {
+            "Description": "Serverless Memory Service Nodejs SDK",
+            "CompatibleRuntimes": [
+               "nodejs12.x"
+            ],
+            "LicenseInfo": "MIT",
+            "LayerName": "lambda-cache-nodejs-sdk",
+            "Content": {
+               "S3Bucket": "SOURCE_BUCKET_NAME",
+               "S3Key": "sdk/lambda-cache-nodejs-sdk-VERSION.zip"
+            }
+         }
+      },
+      "LambdaExecutionRole": {
+         "Type": "AWS::IAM::Role",
+         "Properties": {
+            "AssumeRolePolicyDocument": {
+               "Version": "2012-10-17",
+               "Statement": [{ "Effect": "Allow", "Principal": { "Service": ["lambda.amazonaws.com"] }, "Action": ["sts:AssumeRole"] }]
+            },
+            "Path": "/",
+            "Policies": [{
+               "PolicyName": "root",
+               "PolicyDocument": {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                     { "Effect": "Allow", "Action": ["logs:*"], "Resource": "arn:aws:logs:*:*:*" },
+                     { "Effect": "Allow", "Action": ["s3:*"], "Resource": "*" }
+                  ]
+               }
+            }]
+         }
+      },
+      "PythonDemo": {
+         "Type": "AWS::Lambda::Function",
+         "Properties": {
+            "Description": "",
+            "FunctionName": { "Fn::Join": ["", [{ "Ref": "AWS::StackName" }, "-", "lambda-cache-python-demo"]] },
+            "Handler": "lambda_function.lambda_handler",
+            "Code": {
+               "S3Bucket": "SOURCE_BUCKET_NAME",
+               "S3Key": "lambda/lambda-cache-python-demo-VERSION.zip"
+            },
+            "Role": { "Fn::GetAtt": ["LambdaExecutionRole", "Arn"] },
+            "MemorySize": 128,
+            "Runtime": "python3.8",
+            "Timeout": 60,
+            "TracingConfig": {
+               "Mode": "PassThrough"
+            },
+            "Layers": [
+               { "Ref": "LambdaLayerPython" }
+            ],
+            "Environment": {
+               "Variables": {
+                  "DISTRIBUTION": { "Fn::GetAtt": ["PublicDistribution", "DomainName"] },
+                  "STORAGE_BUCKET": { "Ref": "StorageBucketName" },
+                  "REGION": { "Ref": "AWS::Region" }
+               }
+            }
+         }
+      },
+      "NodejsDemo": {
+         "Type": "AWS::Lambda::Function",
+         "Properties": {
+            "Description": "",
+            "FunctionName": { "Fn::Join": ["", [{ "Ref": "AWS::StackName" }, "-", "lambda-cache-nodejs-demo"]] },
+            "Handler": "index.handler",
+            "Code": {
+               "S3Bucket": "SOURCE_BUCKET_NAME",
+               "S3Key": "lambda/lambda-cache-nodejs-demo-VERSION.zip"
+            },
+            "Role": { "Fn::GetAtt": ["LambdaExecutionRole", "Arn"] },
+            "MemorySize": 128,
+            "Runtime": "nodejs12.x",
+            "Timeout": 60,
+            "TracingConfig": {
+               "Mode": "PassThrough"
+            },
+            "Layers": [
+               { "Ref": "LambdaLayerNodejs" }
+            ],
+            "Environment": {
+               "Variables": {
+                  "DISTRIBUTION": { "Fn::GetAtt": ["PublicDistribution", "DomainName"] },
+                  "STORAGE_BUCKET": { "Ref": "StorageBucketName" }
+               }
+            }
+         }
+      },
+      "NodejsAuthDemo": {
+         "Type": "AWS::Lambda::Function",
+         "Condition": "UseAuthentication",
+         "Properties": {
+            "Description": "",
+            "FunctionName": { "Fn::Join": ["", [{ "Ref": "AWS::StackName" }, "-", "lambda-cache-nodejs-auth-demo"]] },
+            "Handler": "index.handler",
+            "Code": {
+               "S3Bucket": "SOURCE_BUCKET_NAME",
+               "S3Key": "lambda/lambda-cache-nodejs-auth-demo-VERSION.zip"
+            },
+            "Role": { "Fn::GetAtt": ["LambdaExecutionRole", "Arn"] },
+            "MemorySize": 128,
+            "Runtime": "nodejs12.x",
+            "Timeout": 60,
+            "TracingConfig": {
+               "Mode": "PassThrough"
+            },
+            "Layers": [
+               { "Ref": "LambdaLayerNodejs" }
+            ],
+            "Environment": {
+               "Variables": {
+                  "DISTRIBUTION": { "Fn::GetAtt": ["PrivateDistribution", "DomainName"] },
+                  "STORAGE_BUCKET": { "Ref": "StorageBucketName" },
+                  "PK_PATH": "private_key.pem",
+                  "PUBLIC_KEY_ID": "ADD YOU KEY PAIR ID HERE"
+               }
+            }
+         }
+      }
+   },
+   "Outputs": {
+      "StorageBucket": {
+         "Value": { "Ref": "StorageBucketName" },
+      },
+      "PublicDistributionURL": {
+         "Value": { "Fn::GetAtt": ["PublicDistribution", "DomainName"] },
+      },
+      "PrivateDistributionURL": {
+         "Value": {
+            "Fn::If": [
+               "UseAuthentication",
+               { "Fn::GetAtt": ["PrivateDistribution", "DomainName"] },
+               "No private distribution"
+            ]
+         }
+      }
+   },
+   "Metadata": {
+      "AWS::ServerlessRepo::Application": {
+         "Name": "lambda-cache",
+         "Description": "Cost-effective, simple to use, serverless cache, persisted on S3 and loaded in cloudfront's edge locations memory.\n Simple SDK (put and get) currently for Pyhton and Nodejs to overcome the stateless nature of AWS Lambda.",
+         "Author": "Javier Santana",
+         "SpdxLicenseId": "MIT",
+         "LicenseUrl": "LICENSE.txt",
+         "ReadmeUrl": "README.md",
+         "Labels": [
+            "cache", "memory", "lambda", "cloudfront", "s3", "python", "nodejs"
+         ],
+         "HomePageUrl": "https://github.com/lambda-cache",
+         "SemanticVersion": "VERSION",
+         "SourceCodeUrl": "https://github.com/lambda-cache"
+      }
+   }
+}
