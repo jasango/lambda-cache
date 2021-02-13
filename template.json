@@ -463,9 +463,9 @@
          "Labels": [
             "cache", "memory", "lambda", "cloudfront", "s3", "python", "nodejs"
          ],
-         "HomePageUrl": "https://github.com/lambda-cache",
+         "HomePageUrl": "https://github.com/jasango/lambda-cache",
          "SemanticVersion": "VERSION",
-         "SourceCodeUrl": "https://github.com/lambda-cache"
+         "SourceCodeUrl": "https://github.com/jasango/lambda-cache"
       }
    }
 }
