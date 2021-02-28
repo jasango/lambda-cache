@@ -222,7 +222,7 @@ The internet operating system is the ability of the cloud computing era to creat
 
 ### Why you do not simply use AWS ElastiCache / DynamoDb Accelerator (DAX) or AWS API Gateway Cache?
 
-* They do not have the simple "Internet Operating System" phylosofy. The simple put / get operations over the memory resource are well worth and  that keep code clean and understandable. 
+* They do not have the simple "Internet Operating System" philosophy. The simple put / get operations over the memory resource are well worth and  that keep code clean and understandable. 
 * Those services are great but are not well suited for not internet-exposed Lambda function executions.
 * The least monthly cost of AWS ElastiCache is 12.41 on one on-demand t2.micro server (not serverless / not high available / not fault-tolerant / not cost effective).
 * The least monthly cost of DAX is 29.20 on one on-demand t2.small server (not serveless / not high  available / not fault-tolerant / not cost effective).   
